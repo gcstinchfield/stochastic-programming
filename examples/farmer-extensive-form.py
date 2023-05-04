@@ -1,8 +1,8 @@
 import pyomo.environ as pyo
 
 """"
-This is a scenario representation of the farmer problem example.
-  (section 1.1b, pg. 6-7, Birge & Louveax)
+This is the extensive form of the farmer problem example.
+  (section 1.1b, pg. 7-8, Birge & Louveax)
 
 A farmer is trying to decide what to plant for the next season.
     - He has wheat (1), corn (2), and sugar beets (3)
@@ -13,8 +13,10 @@ Goal: max. the net proficts from purchasing, selling, and planting crops for nex
 
 However, there is no guarantees on the weather. The actual yield of the crops changes depending on weather -> aka uncertain.
 Here, let's consider 3 scenarios: good, fair, or bad weather next year.
+Link the different scenario variables together to get the best possible solution.
 
 """
+
 class Farmer():
     def __init__(self,weather_types="fair"):
 
@@ -40,9 +42,9 @@ class Farmer():
             for weather in weather_types:
 
                 # for scenario rep, the yield changes (+/-20%) based on weather.
-                if weather_types == "good": predicted_yield=1.2
-                if weather_types == "fair": predicted_yield=1
-                if weather_types == "bad": predicted_yield=0.8
+                if weather == "good": predicted_yield=1.2
+                if weather == "fair": predicted_yield=1
+                if weather == "bad": predicted_yield=0.8
 
                 crop_yield_scenarios[weather]={"wheat":2.5*predicted_yield,
                                                 "corn":3*predicted_yield,
@@ -91,7 +93,6 @@ class Farmer():
 
         """ CONSTRAINTS """
 
-        # deteremine how much land to devote to each crop, maximizing E[profit]
         model.obj=pyo.Objective( expr= sum(model.x[planted_crop]*self.planting_cost[planted_crop] for planted_crop in self.planting_crops) \
                                         -sum(model.w[sold_crop]*self.selling_price[sold_crop] for sold_crop in self.selling_crops) \
                                          +sum(model.y[purchased_crop]*self.purchase_price[purchased_crop] for purchased_crop in self.purchasing_crops ))
@@ -104,40 +105,93 @@ class Farmer():
         # must have at least x of wheat,corn
         @model.Constraint(self.required_crops)
         def minimum_requirement(model, required_crop):
-            # total acres allotted * yield / acre + tons of wheat purchased - tons of wheat sold
             return ( model.x[required_crop]*self.crop_yield[required_crop] + model.y[required_crop] - model.w[required_crop] \
                     >= self.min_requirement[required_crop])
-
-        # the total tons of sugar beats sold, at either price, must be equal to the amount produced.
+        
         @model.Constraint()
         def sugar_beet_mass_balance(model):
-            # sugar beets sold unfavorably + sold favorably <= total acreas allotted * yeild / acre
             return ( model.w["beets_favorable"] + model.w["beets_unfavorable"] \
                     <= self.crop_yield["beets"]*model.x["beets"] )
 
         # the favorably priced beets cannot exceed 6000 (T)
         @model.Constraint()
         def sugar_beet_quota(model):
-            # sugar beets sold at favorable price <= 6000 tons
             return ( model.w["beets_favorable"] <= self.beets_quota )
         
         # add model to the class obj
         self.deterministic_model=model
+    
+
+    def build_extensive_form_model(self):
+                        
+        # create pyomo model
+        model = pyo.ConcreteModel()
+
+        """ VARIABLES """
+
+        # land variables [=] acres of land devoted to each crop
+        model.x=pyo.Var(self.planting_crops, 
+                        within=pyo.NonNegativeReals)
+
+        # selling decision variables [=] tons of crop sold
+        model.w=pyo.Var(self.weathers,
+                        self.selling_crops, 
+                        within=pyo.NonNegativeReals)
+
+        # purchasing decision variables [=] tons of crop purchased
+        model.y=pyo.Var(self.weathers,
+                        self.purchasing_crops, 
+                        within=pyo.NonNegativeReals)
+
+        """ CONSTRAINTS """
+
+        model.obj=pyo.Objective( expr = sum(model.x[planted_crop]*self.planting_cost[planted_crop] for planted_crop in self.planting_crops) + \
+                                        (-1/3)*sum(model.w[weather,sold_crop]*self.selling_price[sold_crop] for sold_crop in self.selling_crops for weather in self.weathers) \
+                                             +(1/3)*sum(model.y[weather,purchased_crop]*self.purchase_price[purchased_crop] for purchased_crop in self.purchasing_crops for weather in self.weathers) )
+
+        # total acres allocated cannot exceed total available acreas
+        @model.Constraint()
+        def total_acreage_allowed(model):
+            return ( sum(model.x[planted_crop] for planted_crop in self.planting_crops) <= self.total_acres )
+
+        # must have at least x of wheat,corn
+        @model.Constraint(self.weathers, self.required_crops)
+        def minimum_requirement(model, weather, required_crop):
+            return ( model.x[required_crop]*self.crop_yield[weather][required_crop] + model.y[weather,required_crop] - model.w[weather,required_crop] \
+                    >= self.min_requirement[required_crop])
+
+        @model.Constraint(self.weathers)
+        def sugar_beet_mass_balance(model, weather):
+            return ( model.w[weather,"beets_favorable"] + model.w[weather,"beets_unfavorable"] \
+                    <= self.crop_yield[weather]["beets"]*model.x["beets"] )
+
+        # the favorably priced beets cannot exceed 6000 (T)
+        @model.Constraint(self.weathers)
+        def sugar_beet_quota(model, weather):
+            return ( model.w[weather,"beets_favorable"] <= self.beets_quota )
+        
+        # add model to the class obj
+        self.extensive_form_model=model
+
 
     def solve_pyomo_model(self,which):
 
         if which=="deterministic":
-            # solve the deterministic LP
+            # solve the deterministic form
             opt=pyo.SolverFactory('gurobi')
             solver_result=opt.solve(self.deterministic_model, 
-                                    tee=True)
+                                    tee=False)
             self.detereministic_result=solver_result
+        if which=="extensive":
+            # solve the extensive form
+            opt=pyo.SolverFactory('gurobi')
+            solver_result=opt.solve(self.extensive_form_model, 
+                                    tee=False)
+            self.extensive_form_results=solver_result
     
     def show_results(self,which="deterministic"):
 
         if which=="deterministic":
-
-            """ RESULTS """
             print("\nWeather =", self.weathers)
             print("\nSurface (acres)")
             print("\tWheat =", pyo.value(self.deterministic_model.x["wheat"]))
@@ -161,20 +215,36 @@ class Farmer():
             print("\tBeets = we never purchase.")
 
             print("\nOverall Profit = $", round(-pyo.value(self.deterministic_model.obj),2))
+        
+        if which=="extensive":
+            for weather in self.weathers:
+                print("\nWeather =", weather)
+                print("\nSurface (acres)")
+                print("\tWheat =", pyo.value(self.extensive_form_model.x["wheat"]))
+                print("\tCorn =", pyo.value(self.extensive_form_model.x["corn"]))
+                print("\tBeets =", pyo.value(self.extensive_form_model.x["beets"]))
+
+                print("Yield (T)")
+                print("\tWheat =", pyo.value(self.extensive_form_model.x["wheat"])*self.crop_yield[weather]["wheat"])
+                print("\tCorn =", pyo.value(self.extensive_form_model.x["corn"])*self.crop_yield[weather]["corn"])
+                print("\tBeets =", pyo.value(self.extensive_form_model.x["beets"])*self.crop_yield[weather]["beets"])
+
+                print("Sales (T)")
+                print("\tWheat =", pyo.value(self.extensive_form_model.w[weather,"wheat"]))
+                print("\tCorn =", pyo.value(self.extensive_form_model.w[weather,"corn"]))
+                print("\tBeets =", pyo.value(self.extensive_form_model.w[weather,"beets_favorable"])
+                                    +pyo.value(self.extensive_form_model.w[weather,"beets_unfavorable"]))
+
+                print("Purchase (T)")
+                print("\tWheat =", pyo.value(self.extensive_form_model.y[weather,"wheat"]))
+                print("\tCorn =", pyo.value(self.extensive_form_model.y[weather,"corn"]))
+                print("\tBeets = we never purchase.")
+
+            print("\nE[Overall Profit] = $", round(-pyo.value(self.extensive_form_model.obj),2))
 
 if __name__=="__main__":
     
-    good_farmer=Farmer("good")
-    good_farmer.build_deterministic_model()
-    good_farmer.solve_pyomo_model("deterministic")
-    good_farmer.show_results()
-
-    good_farmer=Farmer("fair")
-    good_farmer.build_deterministic_model()
-    good_farmer.solve_pyomo_model("deterministic")
-    good_farmer.show_results()
-
-    good_farmer=Farmer("bad")
-    good_farmer.build_deterministic_model()
-    good_farmer.solve_pyomo_model("deterministic")
-    good_farmer.show_results()
+    farmer=Farmer(["good","fair","bad"])
+    farmer.build_extensive_form_model()
+    farmer.solve_pyomo_model("extensive")
+    farmer.show_results("extensive")
