@@ -20,7 +20,7 @@ However, there is no guarantees on the weather. The actual yield of the crops ch
 Here, let's consider n scenarios.
 We bin a Normal distribution, draw a sample from the truncated Normal distribution from a,b & assign the 
   probability as the P(a<=X<=b)
-Link the different scenario variables together to get the best possible solution.
+Solve using Bender's decomposition.
 
 Here, we use MPI-SPPY to solve => https://mpi-sppy.readthedocs.io/en/latest/examples.html
 
