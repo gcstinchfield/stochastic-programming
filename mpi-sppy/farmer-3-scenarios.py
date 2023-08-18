@@ -107,6 +107,7 @@ def build_deterministic_model(scenario):
     return model
 
 def scenario_creator(scenario):
+    
     # create parameters / model stored in obj for this scenario
     farmer_scenario=Farmer(scenario)
     model=build_deterministic_model(farmer_scenario)
@@ -148,8 +149,8 @@ if __name__=="__main__":
             scenario_creator,
     )
     conv, obj, _ =ph.ph_main()
-
-    # accessing objective value?
+    print("objective =", obj)
+    quit()
     
     # solve using Bender's
     bounds = {name: -432000 for name in all_scenarios}
